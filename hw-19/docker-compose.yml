@@ -1,0 +1,73 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: lakefs-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - lakefs-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: lakefs-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web UI
+    volumes:
+      - minio_data:/data
+    networks:
+      - lakefs-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  lakefs:
+    image: treeverse/lakefs:latest
+    container_name: lakefs-server
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      LAKEFS_DATABASE_CONNECTION_STRING: ${LAKEFS_DATABASE_CONNECTION_STRING}
+      LAKEFS_BLOCKSTORE_TYPE: s3
+      LAKEFS_BLOCKSTORE_S3_ACCESS_KEY_ID: ${LAKEFS_BLOCKSTORE_S3_ACCESS_KEY_ID}
+      LAKEFS_BLOCKSTORE_S3_SECRET_ACCESS_KEY: ${LAKEFS_BLOCKSTORE_S3_SECRET_ACCESS_KEY}
+      LAKEFS_BLOCKSTORE_S3_ENDPOINT: ${LAKEFS_BLOCKSTORE_S3_ENDPOINT}
+      LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE: ${LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE}
+      LAKEFS_AUTH_ENCRYPT_SECRET_KEY: "some-random-encryption-key-for-lakefs" 
+      LAKEFS_INSTALLATION_USER_NAME: "admin" 
+    ports:
+      - "8000:8000"
+    networks:
+      - lakefs-network
+    volumes:
+      - lakefs_data:/home/lakefs
+    command: ["lakefs", "run"]
+
+volumes:
+  postgres_data:
+  minio_data:
+  lakefs_data:
+
+networks:
+  lakefs-network:
+    driver: bridge
